@@ -1,7 +1,9 @@
 
+
 use strict;
 use warnings;
-use Test::More tests =>138;
+use lib qw(../lib);
+use Test::More tests =>145;
 use Data::Dumper;
 use IP::RangeCompare qw(:ALL);
 use Storable qw(dclone);
@@ -58,6 +60,7 @@ our $package_name='IP::RangeCompare';
   my $obj_b=$package_name->new(1,1);
   my $obj_c=$package_name->new(1,1);
   my $obj_d=$package_name->new(2,2);
+  my $obj_e=$package_name->new(1,2);
   ok($obj_b->cmp_first_int($obj_c)==0,'cmp_first_int 0');
   ok($obj_a->cmp_first_int($obj_b)==-1,'cmp_first_int -1');
   ok($obj_d->cmp_first_int($obj_a)==1,'cmp_first_int 1');
@@ -65,6 +68,17 @@ our $package_name='IP::RangeCompare';
   ok($obj_a->cmp_last_int($obj_b)==0,'cmp_last_int 0');
   ok($obj_c->cmp_last_int($obj_d)==-1,'cmp_last_int -1');
   ok($obj_d->cmp_last_int($obj_a)==1,'cmp_last_int 1');
+
+  ok($obj_a->contiguous_check($obj_d),'contiguous_check 1');
+  ok(!$obj_a->contiguous_check($obj_b),'contiguous_check 1');
+
+  ok($obj_b->cmp_ranges($obj_c)==0,'cmp_ranges same start and end check');
+  ok($obj_a->cmp_ranges($obj_b)==-1,'cmp_ranges obj_a starts before obj_b');
+  ok($obj_b->cmp_ranges($obj_a)==1,'cmp_ranges obj_b starts before obj_a');
+
+  ok($obj_b->cmp_ranges($obj_e)==-1,'cmp_ranges obj_a ends before obj_b');
+  ok($obj_e->cmp_ranges($obj_b)==1,'cmp_ranges obj_b ends before obj_a');
+
   
 }
 ## Notation checks
@@ -624,39 +638,3 @@ our $package_name='IP::RangeCompare';
 ###########################
 # End of the unit script
 __END__
-
-## this belongs in an example file
-{
-  my $ranges=[
-    [
-      map { $package_name->parse_new_range(@{$_}[0,1]) }
-        [qw(10.0.0 10.0.0.1)]
-        ,[qw(10.0.0.2 10.0.0.5)]
-    ]
-
-    ,[
-      map { $package_name->parse_new_range(@{$_}[0,1]) }
-        [qw(10.0.0.0 10.0.0.1)]
-        ,[qw(10.0.0.3 10.0.0.4)]
-        ,[qw(10.0.0.4 10.0.0.5)]
-    ]
-
-    ,[
-      map { $package_name->parse_new_range(@{$_}[0,1]) }
-        [qw(10.0.0.0 10.0.0.1)]
-        ,[qw(10.0.0.3 10.0.0.3)]
-        ,[qw(10.0.0.4 10.0.0.5)]
-    ]
-  ];
-  my $data=[];
-  while(my $list=shift @$ranges) {
-    push @$data,consolidate_ranges($list);
-  }
-  my ($row,$cols,$next);
-  while(1) {
-    ($row,$cols,$next)=compare_row($data,$row,$cols);
-    print join(', ',@$row),"\n";
-    last unless $next;
-  }
-
-}

@@ -1,8 +1,9 @@
 
 use strict;
 use warnings;
-use Test::More tests =>54;
+use Test::More tests =>59;
 use Data::Dumper;
+use lib qw(../lib);
 use IP::RangeCompare qw(:ALL);
 use Storable qw(dclone);
 our $p='IP::RangeCompare';
@@ -29,6 +30,8 @@ our $p='IP::RangeCompare';
   foreach($list_a,$list_b,$list_c) {
     push @$data,consolidate_ranges($_);
   }
+
+## Compare_row Tests
   my ($row,$cols,$next);
   ($row,$cols,$next)=compare_row($data,$row,$cols);
   ok($row->[0] eq '10.0.0.2 - 10.0.0.11','compare_row 0 col 0');
@@ -99,6 +102,51 @@ our $p='IP::RangeCompare';
   ok($row->[2] eq '192.168.2.0 - 192.168.2.0','compare_row 7 col 2');
   ok(!$row->[2]->missing,'compare_row row 7,2 should not be missing');
   ok(!$next,'7 next should be false');
+}
+{
+  my $ranges=[
+    [
+      map { $p->new(@{$_}[0,1]) }
+        [3,8]
+    ]
+
+    ,[
+      map { $p->new(@{$_}[0,1]) }
+        [0,1]
+        ,[4,5]
+    ]
+
+    ,[
+      map { $p->new(@{$_}[0,1]) }
+        [0,1]
+        ,[3,3]
+        ,[4,5]
+    ]
+  ];
+
+   my ($row,$cols,$next,$common);
+   ($row,$cols,$next)=compare_row($ranges,$row,$cols);
+   $common=get_common_range($row);
+   #print $common,"\n";
+   ok($common eq '0.0.0.0 - 0.0.0.1','compare_row set 2 row 1');
+
+   ($row,$cols,$next)=compare_row($ranges,$row,$cols);
+   $common=get_common_range($row);
+   #print $common,"\n";
+   ok($common eq '0.0.0.3 - 0.0.0.3','compare_row set 2 row 2');
+
+   ($row,$cols,$next)=compare_row($ranges,$row,$cols);
+   $common=get_common_range($row);
+   #print $common,"\n";
+   #print Dumper($row);
+   ok($common eq '0.0.0.4 - 0.0.0.5','compare_row set 2 row 2');
+   ok($next,'should say we have something next');
+   #print Dumper($cols);
+   ($row,$cols,$next)=compare_row($ranges,$row,$cols);
+   $common=get_common_range($row);
+   #print $common,"\n";
+   ok(!$next,'should not have anything next');
+
 }
 ###########################
 # End of the unit script

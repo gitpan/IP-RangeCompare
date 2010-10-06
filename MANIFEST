@@ -5,6 +5,8 @@ README
 t/IP-RangeCompare.t
 t/TestCore.t
 t/TestRow.t
+t/TestNextCIDR.t
+t/TestForceCidr.t
 lib/IP/RangeCompare.pm
 examples/compare_row_1.pl
 examples/consolidate_1.pl

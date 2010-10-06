@@ -1,4 +1,4 @@
-IP-RangeCompare version 0.01
+IP-RangeCompare 
 ============================
 
 IP Range Manipulation library built from the ground up to handle
@@ -13,9 +13,17 @@ To install this module type the following:
    make test
    make install
 
+Examples:
+
+See the examples folder
+
+TODO: 
+
+Add interfaces to deal with base and broadcast ips for a range
+
 COPYRIGHT AND LICENCE
 
-Copyright (C) 2010 by A. U. Thor
+Copyright (C) 2010 by Michael Shipper
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.4 or,

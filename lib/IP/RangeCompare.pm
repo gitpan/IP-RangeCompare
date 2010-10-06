@@ -7,7 +7,7 @@ use Data::Dumper;
 use Scalar::Util qw(blessed);
 use Carp qw(croak);
 use vars qw($error $VERSION @ISA @EXPORT_OK %EXPORT_TAGS);
-$VERSION=2.012;
+$VERSION=3.014;
 use Scalar::Util qw(looks_like_number);
 use overload
         '""' => \&notation
@@ -19,6 +19,7 @@ use constant key_generated=>2;
 use constant key_missing=>3;
 use constant key_data=>4;
 use constant ALL_BITS=>0xffffffff;
+use constant MAX_CIDR=>32;
 
 =head1 NAME
 
@@ -112,9 +113,9 @@ IP::RangeCompare - Perl extension for IP Range Comparisons
 
 =head1 DESCRIPTION
 
-Fast Scalable ip range aggregation and summary tool kit.  Find intersections across multiple lists of IP ranges, fast. 
+Fast scalable ip range aggregation and summary tool kit.  Find intersections across multiple lists of IP ranges, fast. 
 
-Although similar in functionality to Net::CIDR::Compare, Net::Netmask and NetAddr::IP, IP::RangeCompare is a completely range driven ip management and evaluation tool, allowing more flexibility and scalability when dealing with the somewhat organic nature of IP-Ranges.
+Although similar in functionality to Net::CIDR::Compare, Net::Netmask and NetAddr::IP, IP::RangeCompare is a completely range driven ip management and evaluation tool allowing more flexibility and scalability when dealing with the somewhat organic nature of IP-Ranges.
 
 If you have a large number of ipv4 ranges and need to inventory lists of ranges for intersections, this is the Module for you!
 
@@ -129,6 +130,10 @@ require Exporter;
   cidr_to_int
   ip_to_int
   int_to_ip
+  size_from_mask
+  base_int
+  broadcast_int
+  cmp_int
 
   sort_ranges 
   sort_largest_first_int_first
@@ -144,6 +149,7 @@ require Exporter;
   fill_missing_ranges
   range_compare
   compare_row
+  range_compare_force_cidr
   );
 
 %EXPORT_TAGS = (
@@ -153,6 +159,10 @@ require Exporter;
     cidr_to_int
     ip_to_int
     int_to_ip
+  size_from_mask
+  base_int
+  broadcast_int
+  cmp_int
   )]
   ,SORT=>[qw(
     sort_ranges 
@@ -171,6 +181,7 @@ require Exporter;
     fill_missing_ranges
     range_compare
     compare_row
+    range_compare_force_cidr
   )]
 );
 
@@ -192,10 +203,14 @@ Helper functions  :HELPER
 
   Imports the following:
 
-    hostmask
+          hostmask
           ip_to_int
           int_to_ip
           cidr_to_int
+	  size_from_mask 
+	  base_int 
+	  broadcast_int 
+	  cmp_int
 
 Overlap functions :OVERLAP
 
@@ -229,6 +244,7 @@ Range processing functions :PROCESS
           range_start_end_fill
           range_compare
           compare_row
+	  range_compare_force_cidr
 
 =head2 OO Methods
 
@@ -520,26 +536,34 @@ sub overlap ($) {
 
   # return true if range_b's start range is contained by range_a
   return 1 if 
-      $range_a->first_int <=$range_b->first_int 
+      #$range_a->first_int <=$range_b->first_int 
+      $range_a->cmp_first_int($range_b)!=1
         &&
-      $range_a->last_int >=$range_b->first_int;
+      #$range_a->last_int >=$range_b->first_int;
+      $range_a->cmp_last_int($range_b)!=-1;
 
   # return true if range_b's end range is contained by range_a
   return 1 if 
-      $range_a->first_int <=$range_b->last_int 
+      #$range_a->first_int <=$range_b->last_int 
+      cmp_int($range_a->first_int,$range_b->last_int )!=1
         &&
-      $range_a->last_int >=$range_b->last_int;
+      #$range_a->last_int >=$range_b->last_int;
+      cmp_int($range_a->last_int,$range_b->last_int)!=-1;
 
   return 1 if 
-      $range_b->first_int <=$range_a->first_int 
+      #$range_b->first_int <=$range_a->first_int 
+      $range_b->cmp_first_int($range_a)!=1
         &&
-      $range_b->last_int >=$range_a->first_int;
+      #$range_b->last_int >=$range_a->first_int;
+      $range_b->cmp_last_int($range_a)!=-1;
 
   # return true if range_b's end range is contained by range_a
   return 1 if 
-      $range_b->first_int <=$range_a->last_int 
+      #$range_b->first_int <=$range_a->last_int 
+      cmp_int($range_b->first_int,$range_a->last_int )!=1
         &&
-      $range_b->last_int >=$range_a->last_int;
+      #$range_b->last_int >=$range_a->last_int;
+      cmp_int($range_b->last_int,$range_a->last_int)!=-1;
 
   # return undef by default
   undef
@@ -555,7 +579,7 @@ sub next_first_int () { $_[0]->last_int + 1 }
 
 =item * my $int=$obj->previous_last_int;
 
-Fetches the end of the previous range
+Returns an integer representing the first interger of the pervious range.
 
 =cut
 
@@ -607,34 +631,26 @@ sub get_first_cidr () {
   my $class=blessed $s;
   my $first_cidr;
   my $output_cidr;
-  for(my $cidr=32;$cidr>-1;--$cidr) {
-    my $mask=ALL_BITS & (ALL_BITS << $cidr);
-    $mask=0 if $cidr==32;
+  for(my $cidr=MAX_CIDR;$cidr>-1;--$cidr) {
+    $output_cidr=MAX_CIDR - $cidr;
+    my $mask=cidr_to_int($output_cidr);
 
     my $hostmask=hostmask($mask);
-    my $size=$hostmask +1;
+    my $size=size_from_mask($mask);
 
-    next if $s->first_int % $size;
+    next if $s->mod_first_int($size);
 
 
     my $last_int=$s->first_int + $hostmask;
-    next if $last_int>$s->last_int;
+    next if cmp_int($last_int,$s->last_int)==1;
 
-    $output_cidr=32 - $cidr;
-    $first_cidr=$class->new(
-      $s->first_int
-      ,$last_int
-    );
+    $first_cidr=$class->new($s->first_int,$last_int);
 
     last;
   }
-  my $cidr_string=join(
-    '/'
-    ,int_to_ip($first_cidr->first_int)
-    ,$output_cidr
-  );
+  my $cidr_string=join('/',int_to_ip($first_cidr->first_int),$output_cidr);
 
-  if($first_cidr->last_int==$s->last_int) {
+  if($first_cidr->cmp_last_int($s)==0) {
     return ( $first_cidr ,$cidr_string);
   } else {
     return ( 
@@ -664,7 +680,7 @@ sub is_cidr () {
 
 =item * if($obj->is_range) { do something }
 
-This function can be used to check if a ranges contains multiple cidrs.
+This function can be used to check if a range contains multiple cidrs.
 
 =cut
 
@@ -712,16 +728,17 @@ Example:
 
 sub enumerate {
   my ($s,$cidr)=@_;
-  $cidr=32 unless $cidr;
+  $cidr=MAX_CIDR unless $cidr;
   my $mask=cidr_to_int($cidr);
   my $hostmask=hostmask($mask);
   my $n=$s;
   my $class=blessed $s;
   sub {
     return undef unless $n;
-    my $cidr_end=($n->first_int & $mask) + $hostmask;
+    #my $cidr_end=($n->first_int & $mask) + $hostmask;
+    my $cidr_end=broadcast_int($n->first_int , $mask);
     my $return_ref;
-    if($cidr_end >=$n->last_int) {
+    if(cmp_int($cidr_end,$n->last_int)!=-1) {
       $return_ref=$n;
       $n=undef;
     } else {
@@ -752,7 +769,7 @@ Returns
 
 sub cmp_first_int($) {
   my ($s,$cmp)=@_;
-  $s->first_int <=> $cmp->first_int
+  cmp_int($s->first_int,$cmp->first_int)
 }
 
 =item * if($obj_a->cmp_last_int($obj_b)==0) { }
@@ -770,7 +787,53 @@ Returns
 
 sub cmp_last_int($) {
   my ($s,$cmp)=@_;
-  $s->last_int <=> $cmp->last_int
+  cmp_int($s->last_int,$cmp->last_int)
+}
+
+=item * if($obj->contiguous_check($obj_next)) { do something }
+
+Returns true if $obj_next dirrectly follows $obj
+
+=cut
+
+sub contiguous_check ($) {
+  my ($cmp_a,$cmp_b)=@_;
+  cmp_int($cmp_a->next_first_int,$cmp_b->first_int)==0
+}
+
+=item * my $mod=$obj->mod_first_int($x);
+
+Returns the modulus if the first integer and $x.
+
+=cut
+
+sub mod_first_int ($) { $_[0]->first_int % $_[1] }
+
+=item * my $cmp=$obj_a->cmp_ranges($obj_b);
+
+Compares 2 IP::RangeCompare objects
+
+  Returns 0 if both ranges have the same first_int and last_int
+  Returns -1 if $obj_a->first_int starts before $obj_b->first_int
+    or if $obj_a and $obj_b have the same first_int
+       and $obj_a ends before $obj_b
+  Returns 1 if $obj_a->first_int starts after $obj_b->first_int
+    or if $obj_a and $obj_b have the same first_int
+       and $obj_a ends after $obj_b
+
+=cut
+
+sub cmp_ranges ($) {
+  my ($range_a,$range_b)=@_;
+  return 0 if 
+    $range_a->cmp_first_int($range_b)==0
+    and
+    $range_a->cmp_last_int($range_b)==0;
+
+  $range_a->cmp_first_int($range_b)
+  ||
+  $range_a->cmp_last_int($range_b)
+
 }
 
 ###########################################
@@ -832,9 +895,31 @@ Given a netmask (as an integer) returns the corresponding hostmask.
 
 =cut
 
-sub hostmask ($) {
-  ALL_BITS & (~(ALL_BITS & $_[0]))
-}
+sub hostmask ($) { ALL_BITS & (~(ALL_BITS & $_[0])) }
+
+=item * my $size=size_from_mask($mask);
+
+Given a netmask ( as an integer ) returns the size of the network.
+
+=cut
+
+sub size_from_mask ($) { 1 + hostmask($_[0] ) }
+
+=item * item my $base=base_int($ip_int,$mask_int);
+
+Returns the base address of an ip as an integer given the proper mask as an integer.
+
+=cut
+
+sub base_int ($$) { $_[0] & $_[1] }
+
+=item * my $broadcast=broadcast_int($ip_int,$ip_mask);
+
+Returns the broadcast address as an integer given the proper mask and ip as integers.
+
+=cut
+
+sub broadcast_int ($$) { base_int($_[0],$_[1]) + hostmask($_[1]) }
 
 ###########################################
 #
@@ -847,11 +932,19 @@ Given a cidr(0 - 32) return the netmask as an integer.
 
 sub cidr_to_int ($) {
   my ($cidr)=@_;
-  my $shift=32 -$cidr;
-  return undef if $cidr>32 or $cidr<0;
-  return 0 if $shift==32;
+  my $shift=MAX_CIDR -$cidr;
+  return undef if $cidr>MAX_CIDR or $cidr<0;
+  return 0 if $shift==MAX_CIDR;
   ALL_BITS & (ALL_BITS << $shift)
 }
+
+=item * my $reult=cmp_int(1,2);
+
+Returns the same thing as: 1 <=> 2
+
+=cut
+
+sub cmp_int ($$) { $_[0] <=> $_[1] }
 
 ############################################
 #
@@ -881,17 +974,25 @@ sub get_common_range ($) {
 
 =head2 Sort Functions
 
-  sort_largest_last_int_first
-    Sorts by $obj->last_int in descending order
+This section describes the order in wich each function sorts a list of IP::RangeCompare objects.
 
-  sort_smallest_first_int_first
-    Sorts by $obj->first_int in ascending order
+=over 4
 
-  sort_smallest_last_int_first
-    Sorts by $obj->last_int in ascending order
+=item * my @list=sort sort_largest_last_int_first @list;
 
-  sort_largest_first_int_first
-    Sorts by $obj->first_int in descending order
+Sorts by $obj->last_int in descending order
+
+=item * my @list=sort sort_smallest_first_int_first @list;
+
+Sorts by $obj->first_int in ascending order
+
+=item * my @list=sort sort_smallest_last_int_first @list;
+
+Sorts by $obj->last_int in ascending order
+
+=item * my @list=sort sort_largest_first_int_first @list;
+
+Sorts by $obj->first_int in descending order
 
   sort_ranges
     Sorts by 
@@ -903,38 +1004,40 @@ sub get_common_range ($) {
       sort_largest_last_int_first 
       @netiprangecomapre_objects;
 
+=back
+
 =cut
 
 sub sort_ranges ($$) {
   my ($range_a,$range_b)=@_;
 
   # smallest start
-  $range_a->first_int <=> $range_b->first_int
+  $range_a->cmp_first_int($range_b)
   ||
   # largest end
-  $range_b->last_int <=> $range_a->last_int
+  $range_b->cmp_last_int($range_a);
 
 }
 
 sub sort_largest_last_int_first ($$) {
   my ($range_a,$range_b)=@_;
-  $range_b->last_int <=> $range_a->last_int
-
+  $range_b->cmp_last_int($range_a)
 }
 
 sub sort_smallest_first_int_first ($$) {
   my ($range_a,$range_b)=@_;
-  $range_a->first_int <=> $range_b->first_int
+  $range_a->cmp_first_int($range_b)
 }
 
 sub sort_smallest_last_int_first ($$) {
   my ($range_a,$range_b)=@_;
-  $range_a->last_int <=> $range_b->last_int
+  $range_a->cmp_last_int($range_b)
+  
 }
 
 sub sort_largest_first_int_first ($$) {
   my ($range_a,$range_b)=@_;
-  $range_b->first_int <=> $range_a->first_int
+  $range_b->cmp_first_int($range_a)
 }
 
 ############################################
@@ -972,10 +1075,7 @@ sub new_from_range ($) {
     return undef;
   }
   my ($start,$end)=split /\s*-\s*/,$range;
-  $s->new(
-    ip_to_int($start)
-    ,ip_to_int($end)
-  );
+  $s->new( ip_to_int($start) ,ip_to_int($end));
   
 }
 
@@ -998,13 +1098,13 @@ sub new_from_cidr ($) {
   if($mask=~ /\./) {
     # we know its quad notation
     $mask_int=ip_to_int($mask);
-  } elsif($mask>=0 && $mask<=32) {
+  } elsif(cmp_int($mask,0)!=-1 && cmp_int($mask,MAX_CIDR)!=1) {
     $mask_int=cidr_to_int($mask);
   } else {
     $mask_int=ip_to_int($mask);
   }
-  my $first_int=$ip_int & $mask_int;
-  my $last_int= $first_int + (~ (ALL_BITS & $mask_int));
+  my $first_int=base_int($ip_int , $mask_int);
+  my $last_int=broadcast_int( $first_int,$mask_int);
 
 
   $s->new($first_int,$last_int);
@@ -1056,7 +1156,10 @@ sub consolidate_ranges ($) {
   my $return_ref=[];
   while( my $next=shift @$ranges) {
     if($cmp->overlap($next)) {
-      my $overlap=get_overlapping_range([$cmp,$next]);
+      my $overlap=$cmp->cmp_ranges($next)==0 ? 
+        $cmp
+	  :
+        get_overlapping_range([$cmp,$next]);
       $cmp=$overlap;
 
     } else {
@@ -1077,7 +1180,19 @@ sub consolidate_ranges ($) {
 
 =item * my $ranges=fill_missing_ranges(\@consolidated_list);
 
+=item * my $ranges=fill_missing_ranges(\@list,consolidate_ranges=>1);
+
+=item * my $ranges=fill_missing_ranges(\@list,consolidate_ranges=>0);
+
 Given a consolidated list of IP::RangeCompare objects, it returns a contiguous list reference of ranges.  All ranges generated by the fill_missing_ranges are $obj->missing==true and $obj->generated==true.
+
+Optional argument(s)
+
+  consolidate_ranges=>0||1
+    Default value 1 
+      Performs a consolidate_ranges on each list
+    Disalble consolidation 0
+      Skips the consolidate_ranges call
 
 Example:
 
@@ -1088,7 +1203,6 @@ Example:
   push @$list,IP::RangeCompare->parse_new_range('10/24');
   push @$list,IP::RangeCompare->parse_new_range('8/24');
 
-  $list=consolidate_ranges($list);
   $list=fill_missing_ranges($list);
 
   while(my $range=shift @$list) {
@@ -1100,30 +1214,25 @@ Example:
   8.0.1.0 - 9.255.255.255
   10.0.0.0 - 10.0.0.255
 
-Notes:
-
-  This function expects a consolidated list for input.  If you 
-  get strange results, make sure you consolidate your input 
-  list first.
-
 =cut
 
-sub fill_missing_ranges ($) {
-  my ($ranges)=@_;
+sub fill_missing_ranges {
+  my ($ranges,%args)=@_;
+  %args=(consolidate_ranges=>0,%args);
   
   croak 'argument is not an array reference' unless
     ref($ranges) and ref($ranges) eq 'ARRAY';
   croak 'empty list reference' if $#$ranges==-1;
-  # first we have to consolidate the ranges
   my $class=blessed $ranges->[0];
 
-  $ranges=consolidate_ranges($ranges);
+  # first we have to consolidate the ranges
+  $ranges=consolidate_ranges($ranges) if $args{consolidate_ranges};
   my $return_ref=[];
 
   my $cmp=shift @$ranges;
   while(my $next=shift @$ranges) {
     push @$return_ref,$cmp;
-    unless($cmp->next_first_int==$next->first_int) {
+    unless($cmp->contiguous_check($next)) {
       my $missing=$class->new(
         $cmp->next_first_int
         ,$next->previous_last_int);
@@ -1209,7 +1318,7 @@ sub range_start_end_fill ($) {
     my $first_range=$ref->[0];
     my $last_range=$ref->[$#{$ref}];
 
-    if($first_range->first_int!=$first_int) {
+    if(cmp_int($first_range->first_int,$first_int)!=0) {
       my $new_range=$class->new(
           $first_int
           ,$first_range->previous_last_int
@@ -1219,7 +1328,7 @@ sub range_start_end_fill ($) {
       $new_range->[key_generated]=1;
     }
 
-    if($last_range->last_int!=$last_int) {
+    if(cmp_int($last_range->last_int,$last_int)!=0) {
       my $new_range=$class->new(
         $last_range->next_first_int
         ,$last_int
@@ -1239,7 +1348,19 @@ sub range_start_end_fill ($) {
 
 =item * my $sub=range_compare([$list_a,$list_b,$list_c]);
 
+=item * my $sub=range_compare([$list_a,$list_b,$list_c],consolidate_ranges=>1);
+
+=item * my $sub=range_compare([$list_a,$list_b,$list_c],consolidate_ranges=>0);
+
 Compares a list of lists of IP::RangeCompare objects
+
+Optional argument(s)
+
+  consolidate_ranges=>0||1
+    Default value 1 
+      Performs a consolidate_ranges on each list
+    Disalble consolidation 0
+      Skips the consolidate_ranges call
 
 Example:
 
@@ -1317,9 +1438,12 @@ Example:
 
 =cut
 
-sub range_compare ($) {
-  my ($list_of_ranges)=@_;
-  {
+sub range_compare {
+  my ($list_of_ranges,%args)=@_;
+
+  %args=(consolidate_ranges=>1,%args);
+
+  if($args{consolidate_ranges}) {
     my $ref=[];
     while(my $ranges=shift @$list_of_ranges) {
       $ranges=consolidate_ranges($ranges);
@@ -1337,6 +1461,86 @@ sub range_compare ($) {
   };
 }
 
+=item * my $sub=range_compare_force_cidr(\@ranges,%args);
+
+=item * my $sub=range_compare_force_cidr(\@ranges);
+
+This is just a wrapper for range_compare, that returns the common ranges on cidr boundries, along with the cidr notation.
+
+Example:
+
+  my $ranges=[
+    [
+      map { $package_name->new(@{$_}[0,1]) }
+        [0,8]
+    ]
+
+    ,[
+      map { $package_name->new(@{$_}[0,1]) }
+        [0,1]
+        ,[3,4]
+        ,[4,5]
+    ]
+
+    ,[
+      map { $package_name->new(@{$_}[0,1]) }
+        [0,1]
+        ,[3,3]
+        ,[4,5]
+    ]
+  ];
+
+  my $sub=range_compare_force_cidr($ranges);
+  while(my ($common,$cidr,@cols)=$sub->()) {
+        print $common,', ',$cidr,"\n";
+        print join(', ',@cols),"\n\n";
+        last if --$max<=0;
+        ++$count;
+  }
+
+  Output
+
+  0.0.0.0 - 0.0.0.1, 0.0.0.0/31
+  0.0.0.0 - 0.0.0.8, 0.0.0.0 - 0.0.0.1, 0.0.0.0 - 0.0.0.1
+
+  0.0.0.2 - 0.0.0.2, 0.0.0.2/32
+  0.0.0.0 - 0.0.0.8, 0.0.0.2 - 0.0.0.2, 0.0.0.2 - 0.0.0.2
+
+  0.0.0.3 - 0.0.0.3, 0.0.0.3/32
+  0.0.0.0 - 0.0.0.8, 0.0.0.3 - 0.0.0.5, 0.0.0.3 - 0.0.0.3
+
+  0.0.0.4 - 0.0.0.5, 0.0.0.4/31
+  0.0.0.0 - 0.0.0.8, 0.0.0.3 - 0.0.0.5, 0.0.0.4 - 0.0.0.5
+
+  0.0.0.6 - 0.0.0.7, 0.0.0.6/31
+  0.0.0.0 - 0.0.0.8, 0.0.0.6 - 0.0.0.8, 0.0.0.6 - 0.0.0.8
+
+  0.0.0.8 - 0.0.0.8, 0.0.0.8/32
+  0.0.0.0 - 0.0.0.8, 0.0.0.6 - 0.0.0.8, 0.0.0.6 - 0.0.0.8
+
+=cut
+
+sub range_compare_force_cidr {
+  my $sub=range_compare(@_);
+
+  my ($common,@row)=$sub->();
+  my ($cidr,$notation,$next)=$common->get_first_cidr;
+  sub {
+    return () unless @row;
+    my @return_row=($cidr,$notation,@row);
+    if($next) {
+      ($cidr,$notation,$next)=$next->get_first_cidr;
+    } else {
+      ($common,@row)=$sub->();
+      if(@row) {
+        ($cidr,$notation,$next)=$common->get_first_cidr 
+      } else {
+        $next=undef;
+      }
+    }
+    @return_row
+  }
+}
 ###########################################
 #
 # my ($row,$cols,$next,$missing)=compare_row($data,undef,undef);
@@ -1441,7 +1645,7 @@ sub compare_row {
     if($last->cmp_last_int($range)==0) {
       if(defined($next)) {
        my $next_range=$data->[$id]->[$next];
-       if($range->next_first_int==$next_range->first_int) {
+       if($range->contiguous_check($next_range)) {
         $cols->[$id]=$next;
 	$row->[$id]=$next_range;
        } else {
@@ -1466,7 +1670,11 @@ sub compare_row {
   # use recursion to skip all missing rows
   compare_row($data,$row,$cols) if $missing_count==$total;
   for(my $id=0;$id<$total;++$id) {
-  	--$ok if $cols->[$id]==$#{$data->[$id]}
+  	# reduce our ok umber by every row maxed
+  	--$ok if $cols->[$id]==$#{$data->[$id]};
+	# we may have reached the end of our list, but that may
+	# not be final row
+	++$ok unless $row->[$id]->cmp_last_int($end)==0;
   }
 
   #print $ok,"\n";
@@ -1503,6 +1711,7 @@ use Carp qw(croak);
 use constant key_sources=>0;
 use constant key_columns=>1;
 use constant key_compare=>2;
+use constant key_changed=>3;
 
 ############################################
 #
@@ -1517,6 +1726,7 @@ sub new  {
   my ($class)=@_;
   my $ref=[];
   $ref->[key_sources]={};
+  $ref->[key_changed]={};
   $ref->[key_columns]=[];
   $ref->[key_compare]=undef;
 
@@ -1554,6 +1764,7 @@ sub add_range ($$) {
     $list=$s->[key_sources]->{$key};
   }
   push @$list,$obj;
+  $s->[key_changed]->{$key}=1;
   $obj
 }
 
@@ -1611,12 +1822,18 @@ sub compare_ranges {
   while(my ($key,$ranges)=each %{$s->[key_sources]}) {
     next if exists $exclude{$key};
     push @$columns,$key;
-    push @$compare_ref,[@$ranges];
+    $s->[key_sources]->{$key}=IP::RangeCompare::consolidate_ranges($ranges)
+     if $s->[key_changed]->{$key};
+    $s->[key_changed]->{$key}=0;
+    push @$compare_ref,$s->[key_sources]->{$key};
 
   }
   croak "no ranges defined" if $#$columns==-1;
 
-  $s->[key_compare]=IP::RangeCompare::range_compare($compare_ref);
+  $s->[key_compare]=IP::RangeCompare::range_compare(
+    $compare_ref
+    ,consolidate_ranges=>0
+  );
 
   1
 }
