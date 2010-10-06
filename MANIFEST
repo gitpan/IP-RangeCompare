@@ -1,0 +1,19 @@
+Changes
+Makefile.PL
+MANIFEST
+README
+t/IP-RangeCompare.t
+t/TestCore.t
+t/TestRow.t
+lib/IP/RangeCompare.pm
+examples/compare_row_1.pl
+examples/consolidate_1.pl
+examples/enumerate_1.pl
+examples/enumerate_2.pl
+examples/fill_missing_ranges_1.pl
+examples/get_first_cidr_1.pl
+examples/get_first_cidr_2.pl
+examples/range_compare_1.pl
+examples/range_start_end_fill_1.pl
+examples/simple_1.pl
+META.yml                                 Module meta-data (added by MakeMaker)
