@@ -1,7 +1,7 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         IP-RangeCompare
-version:      3.016
+version:      3.017
 version_from: lib/IP/RangeCompare.pm
 installdirs:  site
 requires:

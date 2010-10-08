@@ -7,7 +7,7 @@ use Data::Dumper;
 use Scalar::Util qw(blessed);
 use Carp qw(croak);
 use vars qw($error $VERSION @ISA @EXPORT_OK %EXPORT_TAGS);
-$VERSION=3.016;
+$VERSION=3.017;
 use Scalar::Util qw(looks_like_number);
 use overload
         '""' => \&notation
@@ -1082,7 +1082,7 @@ Example:
 
   Output:
   
-  8/11
+  8-11
   9/8
   10/24
   10/22
