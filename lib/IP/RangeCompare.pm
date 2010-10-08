@@ -7,7 +7,7 @@ use Data::Dumper;
 use Scalar::Util qw(blessed);
 use Carp qw(croak);
 use vars qw($error $VERSION @ISA @EXPORT_OK %EXPORT_TAGS);
-$VERSION=3.014;
+$VERSION=3.016;
 use Scalar::Util qw(looks_like_number);
 use overload
         '""' => \&notation
@@ -134,6 +134,8 @@ require Exporter;
   base_int
   broadcast_int
   cmp_int
+  sort_quad
+  sort_notations
 
   sort_ranges 
   sort_largest_first_int_first
@@ -159,10 +161,12 @@ require Exporter;
     cidr_to_int
     ip_to_int
     int_to_ip
+    sort_quad
   size_from_mask
   base_int
   broadcast_int
   cmp_int
+  sort_notations
   )]
   ,SORT=>[qw(
     sort_ranges 
@@ -211,6 +215,7 @@ Helper functions  :HELPER
 	  base_int 
 	  broadcast_int 
 	  cmp_int
+	  sort_quad
 
 Overlap functions :OVERLAP
 
@@ -472,7 +477,7 @@ Example:
 
 =cut
 
-sub notation () {
+sub notation {
   my ($s)=@_;
 
   join ' - '
@@ -691,6 +696,75 @@ sub is_range () {
   $is_range
 }
 
+=item my $ipv4=$obj->nth(0);
+
+Returns the nth ipv4 address in the range.  Returns undef if the ip is out of the range.
+
+Example:
+
+  my $obj=IP::RangeCompare->parse_new_range('10/24');
+  my $base=$obj->nth(0);
+  my $broadcast=$obj->nth(255);
+
+  print $base,"\n";
+  print $broadcast,"\n";
+
+  Output
+  10.0.0.0
+  10.0.0.255
+
+=cut
+
+sub nth ($) {
+	my ($s,$offset)=@_;
+	my $int=$s->first_int + $offset;
+	return undef if cmp_int($int,$s->last_int)==1;
+	int_to_ip($int);
+}
+
+=item * my @list=$obj->base_list_int;
+
+Returns each start address as an integer for every cidr boundry.
+
+=item * my @list=$obj->base_list_ip;
+
+Returns each start address as an ipv4 quad for every cidr boundry.
+
+=item * my @list=$obj->broadcast_list_ip;
+
+Returns each end address as an ipv4 quad for every cidr boundry.
+
+=item * my @list=$obj->broadcast_list_int;
+
+Returns each end address as an integer for every cidr boundry.
+
+=cut
+
+sub _internal_ip_list_func ($) {
+  my ($s,$mode)=@_;
+  my $next=$s;
+  my @list;
+  my $ip;
+  while($next) {
+    ($ip,undef,$next)=$next->get_first_cidr;
+    if($mode eq 'first_int') {
+      push @list,$ip->first_int;
+    } elsif($mode eq 'first_ip') {
+      push @list,$ip->first_ip;
+    } elsif($mode eq 'last_ip') {
+      push @list,$ip->last_ip;
+    } elsif($mode eq 'last_int') {
+      push @list,$ip->last_int;
+    }
+  }
+  @list;
+}
+
+sub base_list_int () { $_[0]->_internal_ip_list_func('first_int') }
+sub base_list_ip () { $_[0]->_internal_ip_list_func('first_ip') }
+sub broadcast_list_int () { $_[0]->_internal_ip_list_func('last_int') }
+sub broadcast_list_ip () { $_[0]->_internal_ip_list_func('last_ip') }
+
 ###########################################
 #
 
@@ -752,6 +826,65 @@ sub enumerate {
       );
     }
     $return_ref;
+  }
+}
+
+=item * my $sub=$obj->enumerate_size;
+
+=item * my $sub=$obj->enumerate_size(2);
+
+Returns an anonymous subruteen that can be used to walk the current range in ingrements of x ips.  Default value is 1.
+
+Example:
+
+  my $obj=IP::RangeCompare->parse_new_range('10.0.0.0 - 10.0.0.6');
+
+  my $sub=$obj->enumerate_size;
+
+  print "Inc by 1\n";
+  while(my $range=$sub->()) {
+    print $range,"\n";
+  }
+
+  print "Inc by 3\n";
+  $sub=$obj->enumerate_size(3);
+  while(my $range=$sub->()) {
+    print $range,"\n";
+  }
+
+  Output:
+  Inc by 1
+  10.0.0.0 - 10.0.0.1
+  10.0.0.2 - 10.0.0.3
+  10.0.0.4 - 10.0.0.5
+  10.0.0.6 - 10.0.0.6
+
+  Inc by 3
+  10.0.0.0 - 10.0.0.3
+  10.0.0.4 - 10.0.0.6
+
+
+=cut
+
+sub enumerate_size {
+  my ($s,$inc)=@_;
+  my $class=blessed $s;
+  $inc=1 unless $inc;
+  my $done;
+  sub {
+    return undef if $done;
+    my $first=$s->first_int;
+    my $next=$first + $inc;
+    my $last;
+    if(cmp_int($s->last_int,$next)!=-1) {
+      $last=$next;
+    } else {
+      $last=$s->last_int;
+    }
+    my $new_range=$class->new($first,$last);
+    $done=1 if $s->cmp_last_int($new_range)==0;
+    $s=$class->new($new_range->next_first_int,$s->last_int);
+    $new_range;
   }
 }
 
@@ -866,25 +999,6 @@ Converts integers to ipv4 notation
 
 sub int_to_ip ($) { join '.',unpack('C4',(pack('N',$_[0]))) }
 
-###########################################
-#
-
-=item * my $obj=get_overlapping_range([$range_a,$range_b,$range_c]);
-
-Returns an IP::RangeCompare object that overlaps with the provided ranges
-
-=cut
-
-sub get_overlapping_range ($) {
-  my ($ranges)=@_;
-  croak 'list ref is empty' unless $#{$ranges}!=-1;
-  my ($first_int)=sort sort_smallest_first_int_first @$ranges;
-  my ($last_int)=sort sort_largest_last_int_first @$ranges;
-  my $class=blessed($ranges->[0]);
-  my $obj=$class->new($first_int->first_int,$last_int->last_int);
-  $obj->[key_generated]=1;
-  $obj;
-}
 
 ###########################################
 #
@@ -946,8 +1060,55 @@ Returns the same thing as: 1 <=> 2
 
 sub cmp_int ($$) { $_[0] <=> $_[1] }
 
+=item * my @sorted_quads=sort sort_quad qw(10.0.0.1 10.0.0.10);
+
+Sorts ipv4 quad strings in ascending order
+
+=cut
+
+sub sort_quad ($$) {
+  my ($ip_a,$ip_b)=@_;
+  cmp_int(ip_to_int($ip_a),ip_to_int($ip_b))
+}
+
+=item * my @sorted=sort sort_notations qw(10/24 10/22 9/8 );
+
+Sorts ip notations in ascending order.  Carp::croak is called if a ranged cannot be parsed
+
+Example:
+  
+  my @sorted=sort sort_notations qw(10/24 10/22 9/8  8-11 );
+  print join("\n",@sorted),"\n";
+
+  Output:
+  
+  8/11
+  9/8
+  10/24
+  10/22
+
+=cut
+
+sub sort_notations ($$) {
+  my ($n_a,$n_b)=map { IP::RangeCompare->parse_new_range($_) } @_;
+  croak 'cannot parse notation a or b' 
+    unless 2==grep { defined($_) } ($n_a,$n_b);
+
+  $n_a->cmp_ranges($n_b);
+}
+
 ############################################
 #
+
+=pod
+
+=back
+
+=head2 Overlap functions
+
+This section documents the functions used to find and compute range overlaps.
+
+=over 4
 
 =item * my $obj=get_common_range([$range_a,$range_b]);
 
@@ -968,6 +1129,26 @@ sub get_common_range ($) {
   );
 }
 
+###########################################
+#
+
+=item * my $obj=get_overlapping_range([$range_a,$range_b,$range_c]);
+
+Returns an IP::RangeCompare object that overlaps with the provided ranges
+
+=cut
+
+sub get_overlapping_range ($) {
+  my ($ranges)=@_;
+  croak 'list ref is empty' unless $#{$ranges}!=-1;
+  my ($first_int)=sort sort_smallest_first_int_first @$ranges;
+  my ($last_int)=sort sort_largest_last_int_first @$ranges;
+  my $class=blessed($ranges->[0]);
+  my $obj=$class->new($first_int->first_int,$last_int->last_int);
+  $obj->[key_generated]=1;
+  $obj;
+}
+
 =pod
 
 =back
@@ -975,6 +1156,11 @@ sub get_common_range ($) {
 =head2 Sort Functions
 
 This section describes the order in wich each function sorts a list of IP::RangeCompare objects.
+
+All functions in this section use the following syntax modle
+
+Example: 
+  my @list=sort sort_largest_last_int_first @netiprangecomapre_objects;
 
 =over 4
 
@@ -999,10 +1185,6 @@ Sorts by $obj->first_int in descending order
       $obj->first_int in ascending order
       or
       $obj->last_int in descending order
-  Example: 
-    my @list=sort 
-      sort_largest_last_int_first 
-      @netiprangecomapre_objects;
 
 =back
 

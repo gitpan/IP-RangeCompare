@@ -7,6 +7,11 @@ t/TestCore.t
 t/TestRow.t
 t/TestNextCIDR.t
 t/TestForceCidr.t
+t/enumerate_size.t
+t/Base_Broadcast.t
+t/NthTest.t
+t/sort_quad.t
+t/sort_notations.t
 lib/IP/RangeCompare.pm
 examples/compare_row_1.pl
 examples/consolidate_1.pl
