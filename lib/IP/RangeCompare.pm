@@ -7,7 +7,7 @@ use Data::Dumper;
 use Scalar::Util qw(blessed);
 use Carp qw(croak);
 use vars qw($error $VERSION @ISA @EXPORT_OK %EXPORT_TAGS);
-$VERSION=3.017;
+$VERSION=3.018;
 use Scalar::Util qw(looks_like_number);
 use overload
         '""' => \&notation
@@ -216,6 +216,7 @@ Helper functions  :HELPER
 	  broadcast_int 
 	  cmp_int
 	  sort_quad
+	  sort_notations
 
 Overlap functions :OVERLAP
 
@@ -696,7 +697,7 @@ sub is_range () {
   $is_range
 }
 
-=item my $ipv4=$obj->nth(0);
+=item * my $ipv4=$obj->nth(0);
 
 Returns the nth ipv4 address in the range.  Returns undef if the ip is out of the range.
 
@@ -1073,15 +1074,15 @@ sub sort_quad ($$) {
 
 =item * my @sorted=sort sort_notations qw(10/24 10/22 9/8 );
 
-Sorts ip notations in ascending order.  Carp::croak is called if a ranged cannot be parsed
+Sorts ip notations in ascending order.  Carp::croak is called if a ranged cannot be parsed.
 
 Example:
-  
+
   my @sorted=sort sort_notations qw(10/24 10/22 9/8  8-11 );
   print join("\n",@sorted),"\n";
 
   Output:
-  
+
   8-11
   9/8
   10/24
